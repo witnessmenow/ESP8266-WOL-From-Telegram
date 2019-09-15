@@ -1,15 +1,28 @@
 /*******************************************************************
     Send a WOL to a machine triggered from Telegram
 
+    Wake on Lan is a standard for waking computers out of a power
+    saving mode.
+
+    Uses just an ESP8266
+
     By Brian Lough
     YouTube: https://www.youtube.com/brianlough
     Tindie: https://www.tindie.com/stores/brianlough/
     Twitter: https://twitter.com/witnessmenow
  *******************************************************************/
+
+// ----------------------------
+// Standard Libraries - Already Installed if you have ESP8266 set up
+// ----------------------------
+
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiUDP.h>
 
+// ----------------------------
+// Additional Libraries - each one of these will need to be installed.
+// ----------------------------
 
 #include <WakeOnLan.h>
 // Library for sending the WOL magic packet
@@ -22,7 +35,6 @@
 // The universal Telegram library
 // https://github.com/witnessmenow/Universal-Arduino-Telegram-Bot
 
-
 #include <ArduinoJson.h>
 // Library used for parsing Json from the API responses
 // NOTE: There is a breaking change in the 6.x.x version,
@@ -30,23 +42,41 @@
 // Search for "Arduino Json" in the Arduino Library manager
 // https://github.com/bblanchon/ArduinoJson
 
-//------- Replace the following! ------
+
+// ----------------------------
+// Replace the following!
+// ----------------------------
 
 char ssid[] = "SSID";         // your network SSID (name)
 char password[] = "password"; // your network password
 
+// Get from the "botFather" on telegram
 #define TELEGRAM_BOT_TOKEN "12345679:XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
-/**
- * The targets MAC address to send the packet to
- */
-byte mac[] = { 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA };
+struct targetDevice {
+  byte mac[6]; //The targets MAC address
+  String deviceName;
+};
+
+// Add or remove devices from this list
+// To get mac address On windows, 
+//         - open cmd
+//         - type "ipconfig /all"
+//         - copy the value for "physical address" (highlight and right click to copy)
+
+targetDevice devices[] ={
+  {{ 0xBC, 0x5F, 0xF4, 0xFF, 0xFF, 0xFF }, "Old PC"}, //BC-5F-F4-FF-FF-FF
+  {{ 0x04, 0xD9, 0xF5, 0xFF, 0xFF, 0xFF }, "New PC"} //04-D9-F5-FF-FF-FF
+};
+
+// Change to match how many devices are in the above array.
+int numDevices = 2;
 
 //------- ---------------------- ------
 
 WiFiUDP UDP;
 /**
- * The Magic Packet needs to be sent as BROADCAST in the LAN
+ * This will brodcast the Magic packet on your entire network range.
  */
 IPAddress computer_ip(255,255,255,255); 
 
@@ -83,7 +113,7 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  // Only required on 2.5 Beta
+  // Required on 2.5 Beta or above.
   client.setInsecure();
 
   
@@ -106,15 +136,18 @@ void handleNewMessages(int numNewMessages) {
       Serial.print("Call back button pressed with text: ");
       Serial.println(text);
 
-      if (text == F("WOL")) {
-        
-        WakeOnLan::sendWOL(computer_ip, UDP, mac, sizeof mac);
+      if (text.startsWith("WOL")) {
+        text.replace("WOL", "");
+        int index = text.toInt();
+        Serial.print("Sending WOL to: ");
+        Serial.println(devices[index].deviceName);
+        WakeOnLan::sendWOL(computer_ip, UDP, devices[index].mac, sizeof devices[index].mac);
       }
     } else {
       String chat_id = String(bot.messages[i].chat_id);
       String text = bot.messages[i].text;
 
-      if (text == F("/options")) {
+      if (text == F("/wol")) {
 
         // Keyboard Json is an array of arrays.
         // The size of the main array is how many row options the keyboard has
@@ -122,16 +155,23 @@ void handleNewMessages(int numNewMessages) {
 
         // "The Text" property is what shows up in the keyboard
         // The "callback_data" property is the text that gets sent when pressed  
-        
-        String keyboardJson = F("[[{ \"text\" : \"Send Wake on Lan\", \"callback_data\" : \"WOL\" }]]");
-        bot.sendMessageWithInlineKeyboard(chat_id, "The options:", "", keyboardJson);
+        String keyboardJson = "[";
+        for(int i = 0; i< numDevices; i++)
+        {
+          keyboardJson += "[{ \"text\" : \"" + devices[i].deviceName + "\", \"callback_data\" : \"WOL" + String(i) + "\" }]";
+          if(i + 1 < numDevices){
+            keyboardJson += ",";
+          }
+        }
+        keyboardJson += "]";
+        bot.sendMessageWithInlineKeyboard(chat_id, "Send WOL to following devices:", "", keyboardJson);
       }
 
       // When a user first uses a bot they will send a "/start" command
       // So this is a good place to let the users know what commands are available
       if (text == F("/start")) {
 
-        bot.sendMessage(chat_id, "/options : returns the inline keyboard\n", "Markdown");
+        bot.sendMessage(chat_id, "/wol : returns list of devices to send WOL to\n", "Markdown");
       }
     }
   }
